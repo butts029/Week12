@@ -1,0 +1,115 @@
+
+R version 3.6.3 (2020-02-29) -- "Holding the Windsock"
+Copyright (C) 2020 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> # Libraries
+> library(Hmisc)
+Loading required package: lattice
+Loading required package: survival
+Loading required package: Formula
+Loading required package: ggplot2
+
+Attaching package: ‘Hmisc’
+
+The following objects are masked from ‘package:base’:
+
+    format.pval, units
+
+> library(caret)
+
+Attaching package: ‘caret’
+
+The following object is masked from ‘package:survival’:
+
+    cluster
+
+> library(parallel)
+> library(doParallel)
+Loading required package: foreach
+Loading required package: iterators
+> 
+> ## removed tidyverse package to reduce number of libraries for msi
+> 
+> # Data Import and Cleaning 
+> ## changed all operations to base R because faster than tidyverse and also to remove tidyverse library
+> gss_tbl <- spss.get("GSS2006.sav") 
+There were 50 or more warnings (use warnings() to see the first 50)
+> gss_tbl <- gss_tbl[, c("BIG5A1", "BIG5A2", "BIG5B1", "BIG5B2", "BIG5C1", "BIG5C2","BIG5D1", "BIG5D2", "BIG5E1", "BIG5E2", "HEALTH")]
+> # Rows missing 10 responses are missing all predictors
+> # Rows missing 11 responses are missing all predictors and response
+> # Want all the rows that do not have 10 or 11 responses missing
+> gss_tbl <- gss_tbl[!(rowSums(is.na(gss_tbl)) %in% c(10, 11)), ]
+> gss_tbl <- apply(gss_tbl, 2, function(x) as.numeric(factor(x)))
+> 
+> # Analysis
+> 
+> # preprocessing of data - impute any missing values
+> preprocess <- preProcess(gss_tbl, method = "knnImpute")
+> imputed_tbl <- predict(preprocess, gss_tbl)
+> 
+> # create 10 folds so that folds will be the same for all methods used
+> folds <-  createFolds(imputed_tbl[,"HEALTH"], 10)
+> 
+> # Time model without parallelizing code
+> exec_time_np <- system.time({
++   
++   # Run extreme gradient boosting regression and compute 10-fold cv statistics
++   xgb_model <- train(HEALTH ~ .*.*.,
++                      data = imputed_tbl,
++                      method = "xgbLinear",
++                      tuneLength = 8,
++                      trControl = trainControl(method = "cv",
++                                               indexOut = folds,
++                                               verboseIter = F)
++   )
++   
++ })
+> 
+> # Time model after parallelizing code
+> exec_time_p <- system.time({
++   
++   # Create cores to use in parallelization
++   local_cluster <- makeCluster(60)
++   registerDoParallel(local_cluster)
++   
++   # Run extreme gradient boosting regression and compute 10-fold cv statistics
++   xgb_model <- train(HEALTH ~ .*.*.,
++                      data = imputed_tbl,
++                      method = "xgbLinear",
++                      tuneLength = 8,
++                      trControl = trainControl(method = "cv",
++                                               indexOut = folds,
++                                               verboseIter = F)
++   )
++   
++   # Stop cluster
++   stopCluster(local_cluster)
++   registerDoSEQ()
++   
++ })
+> 
+> # save results to csv 
+> write.csv(cbind(c("Non - Parallelized", "Parallelized"), c(exec_time_np[3], exec_time_p[3])), file = "../batch.csv")
+> 
+> # Non-parallelized code took  seconds on 1 core.
+> # Parallelized code took  seconds on 7 cores.
+> # Difference of  seconds
+> 
+> proc.time()
+     user    system   elapsed 
+11124.767    21.867 11431.580 

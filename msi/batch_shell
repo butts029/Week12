@@ -1,0 +1,7 @@
+#!/bin/bash -l
+#PBS -l walltime=08:00:00,nodes=1:ppn64,mem=32gb
+#PBS -m abe
+#PBS -M butts029@umn.edu
+cd ~/week12
+module load R/3.6.3
+R CMD BATCH batch.R
